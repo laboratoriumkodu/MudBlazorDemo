@@ -1,0 +1,87 @@
+@page "/auth-info"
+@using System.Security.Claims
+@rendermode InteractiveAuto
+
+<PageTitle>Authentication Info</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-16">
+    <MudCard>
+        <MudCardHeader>
+            <CardHeaderContent>
+                <MudText Typo="Typo.h5">Authentication Information</MudText>
+            </CardHeaderContent>
+        </MudCardHeader>
+        <MudCardContent>
+            @if (User?.Identity?.IsAuthenticated ?? false)
+            {
+                <MudAlert Severity="Severity.Success" Class="mb-4">
+                    ✓ You are authenticated via OpenID Auth Proxy
+                </MudAlert>
+
+                <MudStack Spacing="2">
+                    <MudTextField Label="Username" 
+                        Value="@User.Identity.Name" 
+                        ReadOnly="true" />
+                    
+                    <MudTextField Label="Email" 
+                        Value="@GetClaimValue(ClaimTypes.Email)" 
+                        ReadOnly="true" />
+                    
+                    <MudTextField Label="Display Name" 
+                        Value="@GetClaimValue(ClaimTypes.GivenName)" 
+                        ReadOnly="true" />
+
+                    <MudTextField Label="Name Identifier" 
+                        Value="@GetClaimValue(ClaimTypes.NameIdentifier)" 
+                        ReadOnly="true" />
+                </MudStack>
+
+                <MudDivider Class="my-6" />
+
+                <MudText Typo="Typo.h6" Class="mb-3">All Claims</MudText>
+                <MudTable Items="@GetAllClaims()" Dense="true">
+                    <HeaderContent>
+                        <MudTh>Claim Type</MudTh>
+                        <MudTh>Claim Value</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Claim Type">@context.Type</MudTd>
+                        <MudTd DataLabel="Claim Value">@context.Value</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Warning">
+                    ⚠ You are not authenticated. Please access this app through the Azure AD Application Proxy.
+                </MudAlert>
+            }
+        </MudCardContent>
+    </MudCard>
+</MudContainer>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    private ClaimsPrincipal? User { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthenticationStateTask != null)
+        {
+            var authState = await AuthenticationStateTask;
+            User = authState.User;
+        }
+    }
+
+    private string GetClaimValue(string claimType)
+    {
+        return User?.FindFirst(claimType)?.Value ?? "N/A";
+    }
+
+    private List<Claim> GetAllClaims()
+    {
+        return User?.Claims.ToList() ?? new List<Claim>();
+    }
+}

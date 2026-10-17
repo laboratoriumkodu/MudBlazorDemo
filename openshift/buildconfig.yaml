@@ -1,0 +1,35 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: mudblazor-demo
+  namespace: mudblazor-demo
+  labels:
+    app: mudblazor-demo
+spec:
+  source:
+    type: Git
+    git:
+      uri: https://github.com/your-org/your-repo.git
+      ref: main
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: mudblazor-demo:latest
+  triggers:
+  - type: ConfigChange
+  - type: ImageChange
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: mudblazor-demo
+  namespace: mudblazor-demo
+  labels:
+    app: mudblazor-demo
+spec:
+  lookupPolicy:
+    local: true

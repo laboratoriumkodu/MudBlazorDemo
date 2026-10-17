@@ -1,0 +1,59 @@
+# .dockerignore - Exclude files from Docker build context
+# This reduces Docker build time and image size
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# IDE and editor
+.vscode
+.vs
+.idea
+*.swp
+*.swo
+*~
+.env.local
+
+# Build artifacts
+bin/
+obj/
+dist/
+build/
+*.dll
+*.exe
+*.pdb
+
+# Package managers
+node_modules/
+packages/
+.npm
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Testing
+.coverage
+.nyc_output
+coverage/
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.circleci
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+*.tmp
+*.temp
+.cache

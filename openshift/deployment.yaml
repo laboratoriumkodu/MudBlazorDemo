@@ -1,0 +1,224 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mudblazor-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mudblazor-demo
+  namespace: mudblazor-demo
+  labels:
+    app: mudblazor-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mudblazor-demo
+  template:
+    metadata:
+      labels:
+        app: mudblazor-demo
+    spec:
+      serviceAccountName: mudblazor-demo
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      # OAuth Proxy sidecar - handles OIDC authentication with Entra ID
+      - name: oauth-proxy
+        image: quay.io/oauth2-proxy/oauth2-proxy:v7.5.1
+        imagePullPolicy: IfNotPresent
+        args:
+        - --http-address=0.0.0.0:4180
+        - --upstream=http://localhost:8080/
+        - --provider=oidc
+        - --oidc-issuer-url=https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0
+        - --client-id=$(OAUTH_CLIENT_ID)
+        - --client-secret=$(OAUTH_CLIENT_SECRET)
+        - --redirect-url=https://mudblazor-demo.yourdomain.com/oauth2/callback
+        - --cookie-secure=true
+        - --cookie-httponly=true
+        - --cookie-samesite=lax
+        - --cookie-name=_oauth2_proxy
+        - --email-domain=*
+        - --set-xauthrequest=true
+        - --pass-access-token=true
+        - --pass-user-headers=true
+        - --set-authorization-header=true
+        - --skip-provider-button=true
+        - --whitelist-domains=mudblazor-demo.yourdomain.com
+        # Real client IP: trust X-Forwarded-* from the OpenShift router and use XFF as client IP
+        - --reverse-proxy=true
+        - --real-client-ip-header=X-Forwarded-For
+        - --pass-host-header=true
+        # NOTE: app trusts XFF only from ForwardedHeaders:KnownNetworks (appsettings.Production.json).
+        # Get the pod CIDR: oc get network.config cluster -o jsonpath='{.spec.clusterNetwork[*].cidr}'
+        ports:
+        - name: oauth-proxy
+          containerPort: 4180
+          protocol: TCP
+        env:
+        - name: OAUTH_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: oauth-proxy-secret
+              key: client-id
+        - name: OAUTH_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: oauth-proxy-secret
+              key: client-secret
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        livenessProbe:
+          httpGet:
+            path: /ping
+            port: oauth-proxy
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: oauth-proxy
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+      
+      # MudBlazor application container
+      - name: mudblazor-demo
+        image: image-registry.openshift-image-registry.svc:5000/mudblazor-demo/mudblazor-demo:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        env:
+        - name: ASPNETCORE_ENVIRONMENT
+          value: "Production"
+        - name: ASPNETCORE_URLS
+          value: "http://+:8080"
+        # Forwarded headers (real client IP) are configured explicitly in Program.cs
+        # (ForwardLimit=2, trusted proxies). Do NOT set ASPNETCORE_FORWARDEDHEADERS_ENABLED,
+        # it would register a second ForwardedHeaders middleware with conflicting defaults.
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mudblazor-demo
+  namespace: mudblazor-demo
+  labels:
+    app: mudblazor-demo
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: oauth-proxy
+    protocol: TCP
+  selector:
+    app: mudblazor-demo
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: mudblazor-demo
+  namespace: mudblazor-demo
+  labels:
+    app: mudblazor-demo
+  annotations:
+    # Router overwrites any client-supplied X-Forwarded-For with the real client IP (anti-spoofing).
+    # Use "append" only if an external load balancer in front of the router sets XFF.
+    haproxy.router.openshift.io/set-forwarded-headers: replace
+    # Azure AD Application Proxy specific annotations (if using)
+    azure.microsoft.com/app-proxy-enabled: "false"
+spec:
+  host: mudblazor-demo.example.com
+  to:
+    kind: Service
+    name: mudblazor-demo
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oauth-proxy-secret
+  namespace: mudblazor-demo
+type: Opaque
+stringData:
+  client-id: "YOUR_ENTRA_ID_CLIENT_ID"
+  client-secret: "YOUR_ENTRA_ID_CLIENT_SECRET"
+---
+metadata:
+  name: mudblazor-demo
+  namespace: mudblazor-demo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mudblazor-demo
+  namespace: mudblazor-demo
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mudblazor-demo
+  namespace: mudblazor-demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mudblazor-demo
+subjects:
+- kind: ServiceAccount
+  name: mudblazor-demo
+  namespace: mudblazor-demo
